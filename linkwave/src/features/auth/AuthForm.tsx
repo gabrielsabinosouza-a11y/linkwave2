@@ -1,204 +1,147 @@
 'use client'
 
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useTransition, useRef } from 'react'
+import { motion } from 'framer-motion'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Github, Mail, Chrome } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, Chrome, Github } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { loginSchema, registerSchema, type LoginInput, type RegisterInput } from '@/lib/validations'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import Image from 'next/image'
 
-type Mode = 'login' | 'register'
-
-export default function AuthForm({ mode }: { mode: Mode }) {
+export default function LoginForm() {
   const router = useRouter()
   const supabase = createClient()
   const [showPwd, setShowPwd] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [isPending, startTransition] = useTransition()
+  const [oauthLoading, setOauthLoading] = useState<string | null>(null)
+  const [magicSent, setMagicSent] = useState(false)
+  const emailRef = useRef<HTMLInputElement>(null)
 
-  const schema = mode === 'login' ? loginSchema : registerSchema
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<LoginInput & RegisterInput>({ resolver: zodResolver(schema) })
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const fd = new FormData(e.currentTarget)
+    const email = (fd.get('email') as string).trim().toLowerCase()
+    const password = fd.get('password') as string
 
-  async function onSubmit(values: LoginInput & RegisterInput) {
-    setLoading(true)
-    try {
-      if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: values.email,
-          password: values.password,
-        })
-        if (error) throw error
-        router.push('/dashboard')
-        router.refresh()
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email: values.email,
-          password: values.password,
-          options: {
-            data: { username: values.username },
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
-        })
-        if (error) throw error
-        toast.success('Confirme seu email para continuar!')
+    startTransition(async () => {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) {
+        toast.error('E-mail ou senha incorretos')
+        return
       }
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Ocorreu um erro')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function signInWithProvider(provider: 'google' | 'github' | 'discord') {
-    await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      router.push('/dashboard')
+      router.refresh()
     })
   }
 
-  async function signInWithMagicLink(email: string) {
-    if (!email) return toast.error('Digite seu email')
+  async function handleMagicLink() {
+    const email = emailRef.current?.value.trim().toLowerCase()
+    if (!email) { toast.error('Digite seu e-mail primeiro'); return }
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     })
-    if (error) toast.error(error.message)
-    else toast.success('Magic link enviado! Verifique seu email.')
+    if (error) { toast.error('Erro ao enviar magic link'); return }
+    setMagicSent(true)
+    toast.success('Magic link enviado! Verifique seu e-mail.')
+  }
+
+  async function handleOAuth(provider: 'google' | 'github') {
+    setOauthLoading(provider)
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    })
+    if (error) { toast.error('Erro ao conectar'); setOauthLoading(null) }
   }
 
   return (
     <motion.div
-      className="glass-strong p-8"
+      className="glass-strong p-8 md:p-10"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
     >
-      <div className="flex flex-col items-center mb-8">
-        <Image src="/imgs/icons/favicon.png" alt="LinkWave" width={56} height={56} className="mb-3 float-logo" />
-        <h1 className="font-black text-2xl text-ocean">
-          {mode === 'login' ? 'Bem-vindo de volta' : 'Crie sua conta'}
-        </h1>
-        <p className="text-muted-ocean text-sm mt-1">
-          {mode === 'login' ? 'Entre na sua onda' : 'Comece gratuitamente'}
-        </p>
+      {/* Header */}
+      <div className="text-center mb-8">
+        <Image src="/imgs/icons/favicon.png" alt="LinkWave" width={72} height={72} className="mx-auto mb-4 float-logo" priority />
+        <h1 className="font-black text-3xl text-ocean mb-1">Bem-vindo de volta</h1>
+        <p className="text-muted-ocean text-sm">Entre na sua onda</p>
       </div>
 
-      {/* Social providers */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {([
-          { provider: 'google', Icon: Chrome, label: 'Google' },
-          { provider: 'github', Icon: Github, label: 'GitHub' },
-          { provider: 'discord', Icon: Mail, label: 'Discord' },
-        ] as const).map(({ provider, Icon, label }) => (
-          <button
-            key={provider}
-            onClick={() => signInWithProvider(provider)}
-            className="flex flex-col items-center gap-1 py-3 rounded-2xl font-semibold text-ocean text-xs transition-all hover:scale-105 hover:-translate-y-0.5"
-            style={{
-              background: 'rgba(255,255,255,0.6)',
-              border: '1.5px solid rgba(255,255,255,0.9)',
-              boxShadow: '0 2px 8px rgba(80,180,220,0.15)',
-            }}
-          >
-            <Icon size={18} />
+      {/* OAuth */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        {([{ p: 'google', Icon: Chrome, label: 'Google' }, { p: 'github', Icon: Github, label: 'GitHub' }] as const).map(({ p, Icon, label }) => (
+          <button key={p} type="button" onClick={() => handleOAuth(p)} disabled={!!oauthLoading || isPending}
+            className="flex items-center justify-center gap-2 py-3 rounded-full font-bold text-ocean text-sm bg-white/50 border-[1.5px] border-white/80 hover:bg-white/70 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200">
+            {oauthLoading === p
+              ? <span className="w-4 h-4 border-2 border-ocean/30 border-t-ocean rounded-full animate-spin" />
+              : <Icon size={16} />}
             {label}
           </button>
         ))}
       </div>
 
       <div className="flex items-center gap-3 mb-6">
-        <div className="flex-1 h-px" style={{ background: 'rgba(80,120,160,0.2)' }} />
-        <span className="text-muted-ocean text-xs font-semibold">ou email</span>
-        <div className="flex-1 h-px" style={{ background: 'rgba(80,120,160,0.2)' }} />
+        <div className="flex-1 h-px bg-white/30" />
+        <span className="text-muted-ocean text-xs font-semibold">ou e-mail</span>
+        <div className="flex-1 h-px bg-white/30" />
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        {mode === 'register' && (
-          <div>
-            <Label className="text-ocean font-semibold text-sm">Username</Label>
-            <Input
-              {...register('username')}
-              placeholder="seu_username"
-              className="mt-1 bg-white/50 border-white/70 focus:border-sky-400"
-            />
-            <AnimatePresence>
-              {errors.username && (
-                <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-red-500 text-xs mt-1">
-                  {errors.username.message}
-                </motion.p>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
-
+      {/* Form */}
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         <div>
-          <Label className="text-ocean font-semibold text-sm">Email</Label>
-          <Input
-            {...register('email')}
-            type="email"
-            placeholder="voce@email.com"
-            className="mt-1 bg-white/50 border-white/70 focus:border-sky-400"
-          />
-          {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+          <label htmlFor="email" className="block text-ocean text-sm font-bold mb-1.5">E-mail</label>
+          <div className="relative flex items-center">
+            <Mail size={16} className="absolute left-4 text-ocean-light pointer-events-none" />
+            <input
+              ref={emailRef}
+              id="email" name="email" type="email"
+              placeholder="seu@email.com" autoComplete="email" required
+              className="w-full rounded-full py-3.5 pl-10 pr-4 text-ocean font-medium text-sm bg-white/45 backdrop-blur-sm border-[1.5px] border-white/80 placeholder:text-ocean-light/50 placeholder:font-normal focus:outline-none focus:bg-white/65 focus:border-white focus:ring-2 focus:ring-white/40 transition-all duration-200"
+            />
+          </div>
         </div>
 
         <div>
-          <Label className="text-ocean font-semibold text-sm">Senha</Label>
-          <div className="relative mt-1">
-            <Input
-              {...register('password')}
-              type={showPwd ? 'text' : 'password'}
-              placeholder="••••••••"
-              className="bg-white/50 border-white/70 focus:border-sky-400 pr-10"
+          <label htmlFor="password" className="block text-ocean text-sm font-bold mb-1.5">Senha</label>
+          <div className="relative flex items-center">
+            <Lock size={16} className="absolute left-4 text-ocean-light pointer-events-none" />
+            <input
+              id="password" name="password" type={showPwd ? 'text' : 'password'}
+              placeholder="••••••••" autoComplete="current-password" required
+              className="w-full rounded-full py-3.5 pl-10 pr-12 text-ocean font-medium text-sm bg-white/45 backdrop-blur-sm border-[1.5px] border-white/80 placeholder:text-ocean-light/50 placeholder:font-normal focus:outline-none focus:bg-white/65 focus:border-white focus:ring-2 focus:ring-white/40 transition-all duration-200"
             />
-            <button
-              type="button"
-              onClick={() => setShowPwd(!showPwd)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-ocean"
-            >
+            <button type="button" onClick={() => setShowPwd(!showPwd)} aria-label={showPwd ? 'Ocultar' : 'Mostrar'}
+              className="absolute right-4 text-ocean-light hover:text-ocean transition-colors">
               {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
           </div>
-          {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>}
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="btn-primary w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {loading ? 'Carregando...' : mode === 'login' ? 'Entrar' : 'Criar conta'}
+        <button type="submit" disabled={isPending || !!oauthLoading}
+          className="btn-cta w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none">
+          {isPending
+            ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Entrando...</>
+            : 'Entrar'}
         </button>
 
-        {mode === 'login' && (
-          <button
-            type="button"
-            onClick={() => {
-              const emailEl = document.querySelector<HTMLInputElement>('input[type=email]')
-              signInWithMagicLink(emailEl?.value ?? '')
-            }}
-            className="w-full text-center text-sm text-ocean-light underline underline-offset-2 hover:text-ocean transition-colors"
-          >
-            Entrar com Magic Link
+        {!magicSent ? (
+          <button type="button" onClick={handleMagicLink}
+            className="w-full text-center text-sm text-ocean-light underline underline-offset-2 hover:text-ocean transition-colors">
+            Entrar com Magic Link (sem senha)
           </button>
+        ) : (
+          <p className="text-center text-emerald-600 text-sm font-semibold">✓ Magic link enviado para seu e-mail</p>
         )}
       </form>
 
       <p className="text-center text-muted-ocean text-sm mt-6">
-        {mode === 'login' ? (
-          <>Não tem conta? <Link href="/auth/register" className="text-ocean font-bold hover:underline">Cadastre-se</Link></>
-        ) : (
-          <>Já tem conta? <Link href="/auth/login" className="text-ocean font-bold hover:underline">Entrar</Link></>
-        )}
+        Não tem conta?{' '}
+        <Link href="/auth/register" className="font-bold text-ocean hover:text-emerald-600 transition-colors">
+          Cadastre-se grátis →
+        </Link>
       </p>
     </motion.div>
   )
